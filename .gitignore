@@ -1,0 +1,7 @@
+.pio
+.vscode
+backup_codes
+include
+lib
+test
+PlatformIO.code-workspace

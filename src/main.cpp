@@ -48,6 +48,9 @@ float waterThreshold = 10; // litres remaining before tank pump auto-start
 bool irrigationState = false;
 bool tankPumpState = false;
 bool autoMode = false;
+bool irrigationIsAuto = false;  // Track if irrigation was started by auto mode
+bool tankPumpIsAuto = false;   // Track if tank pump was started by auto mode
+bool waterLevelAlertSent = false;  // Prevent repeated alerts for same threshold
 
 unsigned long irrigationStart = 0;
 unsigned long tankPumpStart = 0;
@@ -125,18 +128,22 @@ float getDistance() {
 }
 
 float getWaterPercent() {
+  // Tank height in meters
+  const float tankHeight = 0.9144; // 914.4 mm = 3 ft
+  const float gap = 0.0762;        // 3 inches = 76.2 mm
 
-  float tankHeight = 0.9652;  // 925mm in meters
+  float distance = getDistance();  // distance from sensor to water surface
 
-  float distance = getDistance();   // meters
+  // Subtract the gap to get actual water height
+  float waterHeight = tankHeight - (distance - gap);
 
-  float waterHeight = tankHeight - distance;
-
+  // Clamp water height
   if (waterHeight < 0) waterHeight = 0;
   if (waterHeight > tankHeight) waterHeight = tankHeight;
 
   float percent = (waterHeight / tankHeight) * 100.0;
 
+  // Optional safety limits
   if (percent < 1) percent = 1;
   if (percent > 100) percent = 100;
 
@@ -266,13 +273,14 @@ void readSensors() {
 
     irrigationDuration = decideIrrigationDuration();
     irrigationState = true;
+    irrigationIsAuto = true;
     irrigationStart = millis();
 
     digitalWrite(IRRIGATION_PUMP_PIN, HIGH);
     Blynk.virtualWrite(VPIN_IRRIGATION, 1);
 
     Blynk.logEvent("irrigation_auto",
-      "Auto irrigation (" + String(irrigationDuration) + "s)");
+      "Auto irrigation activated");
 
     Serial.println("Auto irrigation started");
     sendToSupabase();
@@ -282,16 +290,27 @@ void readSensors() {
   if (autoMode && !tankPumpState && waterPercent <= waterThreshold) {
     // turn pump on for configured duration
     tankPumpState = true;
+    tankPumpIsAuto = true;
     tankPumpStart = millis();
 
     digitalWrite(TANK_PUMP_PIN, HIGH);
     Blynk.virtualWrite(VPIN_TANK_PUMP, 1);
 
     Blynk.logEvent("tank_auto",
-      "Auto tank pump (" + String(tankPumpDuration) + "s)");
+      "Auto tank pump activated");
 
     Serial.println("Tank pump auto started");
     sendToSupabase();
+  }
+
+  // ---- WATER LEVEL LOW THRESHOLD ALERT ----
+  if (!waterLevelAlertSent && waterPercent <= waterThreshold) {
+    waterLevelAlertSent = true;
+    Blynk.logEvent("sensor_threshold",
+      "Water level below threshold");
+    Serial.println("⚠️ Water level alert sent");
+  } else if (waterLevelAlertSent && waterPercent > (waterThreshold + 5)) {
+    waterLevelAlertSent = false;  // Reset when level recovers
   }
 }
 
@@ -310,13 +329,15 @@ BLYNK_CONNECTED() {
 BLYNK_WRITE(VPIN_IRRIGATION) {
   if (autoMode) return;  // Ignore manual control in auto mode
 
+  bool wasOn = irrigationState;
   irrigationState = param.asInt();
+  irrigationIsAuto = false;  // Mark as manual
   digitalWrite(IRRIGATION_PUMP_PIN, irrigationState ? HIGH : LOW);
 
   if (irrigationState) {
     irrigationStart = millis();
     Blynk.logEvent("irrigation_manual", "Manual irrigation started");
-  } else {
+  } else if (wasOn) {
     Blynk.logEvent("irrigation_manual", "Manual irrigation stopped");
   }
   sendToSupabase();
@@ -351,10 +372,17 @@ BLYNK_WRITE(VPIN_LONG)   { durationLong   = param.asInt(); }
 BLYNK_WRITE(VPIN_MANUAL_DURATION) { irrigationDuration = param.asInt(); }
 
 BLYNK_WRITE(VPIN_TANK_PUMP) {
+  bool wasOn = tankPumpState;
   tankPumpState = param.asInt();
+  tankPumpIsAuto = false;  // Mark as manual
   digitalWrite(TANK_PUMP_PIN, tankPumpState ? HIGH : LOW);
 
-  if (tankPumpState) tankPumpStart = millis();
+  if (tankPumpState) {
+    tankPumpStart = millis();
+    Blynk.logEvent("tank_manual", "Manual tank pump started");
+  } else if (wasOn) {
+    Blynk.logEvent("tank_manual", "Manual tank pump stopped");
+  }
   sendToSupabase();
 }
 
@@ -376,7 +404,11 @@ void checkPumps() {
     digitalWrite(IRRIGATION_PUMP_PIN, LOW);
     Blynk.virtualWrite(VPIN_IRRIGATION, 0);
 
-    Blynk.logEvent("irrigation_off", "Irrigation stopped (timer)");
+    if (irrigationIsAuto) {
+      Blynk.logEvent("irrigation_auto", "Auto irrigation stopped (timer)");
+    } else {
+      Blynk.logEvent("irrigation_manual", "Manual irrigation stopped (timer)");
+    }
     Serial.println("⏹️ Irrigation stopped");
     sendToSupabase();
   }
@@ -389,7 +421,11 @@ void checkPumps() {
     digitalWrite(TANK_PUMP_PIN, LOW);
     Blynk.virtualWrite(VPIN_TANK_PUMP, 0);
 
-    Blynk.logEvent("tank_off", "Tank pump stopped (timer)");
+    if (tankPumpIsAuto) {
+      Blynk.logEvent("tank_auto", "Auto tank pump stopped (timer)");
+    } else {
+      Blynk.logEvent("tank_manual", "Manual tank pump stopped (timer)");
+    }
     Serial.println("⏹️ Tank pump stopped");
     sendToSupabase();
   }
@@ -416,7 +452,7 @@ void setup() {
   Blynk.connect();
 
 
-  timer.setInterval(30000L, readSensors); // 1 minute
+  timer.setInterval(120000L, readSensors); // 2 minutes
 }
 
 // ======================================================

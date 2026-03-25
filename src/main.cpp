@@ -34,6 +34,8 @@ DHT dht(DHTPIN, DHTTYPE);
 
 
 // ---- VARIABLES ----
+
+bool isSyncing = true;
 float temperature = 0;
 float humidity = 0;
 float absoluteHumidity = 0;
@@ -54,6 +56,8 @@ bool waterLevelAlertSent = false;  // Prevent repeated alerts for same threshold
 
 unsigned long irrigationStart = 0;
 unsigned long tankPumpStart = 0;
+
+unsigned long syncStartTime = 0;
 
 
 // Tank dimensions (mm)
@@ -121,30 +125,39 @@ float getDistance() {
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH);
+  // Add timeout (VERY IMPORTANT)
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout
 
-  float distance_cm = duration * 0.0343 / 2;  
-  return distance_cm / 100.0;  // convert to meters
+  // If no echo received
+  if (duration == 0) {
+    return -1; // INVALID
+  }
+
+  float distance_cm = duration * 0.0343 / 2;
+  return distance_cm / 100.0;  // meters
 }
 
 float getWaterPercent() {
-  // Tank height in meters
-  const float tankHeight = 0.9144; // 914.4 mm = 3 ft
-  const float gap = 0.0762;        // 3 inches = 76.2 mm
+  const float tankHeight = 0.9144; // 3 ft
+  const float gap = 0.0762;        // 3 inches
 
-  float distance = getDistance();  // distance from sensor to water surface
+  float distance = getDistance();
 
-  // Subtract the gap to get actual water height
+  // Handle invalid reading (no echo)
+  if (distance < 0) {
+    return 0; // assume empty
+  }
+
+  // Remove gap
   float waterHeight = tankHeight - (distance - gap);
 
-  // Clamp water height
+  // Clamp
   if (waterHeight < 0) waterHeight = 0;
   if (waterHeight > tankHeight) waterHeight = tankHeight;
 
   float percent = (waterHeight / tankHeight) * 100.0;
 
-  // Optional safety limits
-  if (percent < 1) percent = 1;
+  // REMOVE forced minimum → allow 0%
   if (percent > 100) percent = 100;
 
   return percent;
@@ -239,12 +252,12 @@ void readSensors() {
 
   absoluteHumidity = computeAbsoluteHumidity(temperature, humidity);
 
-  float waterPercent = getWaterPercent();
+  waterPercent = getWaterPercent();
 
   int raw1 = analogRead(SOIL_PIN1);
   int raw2 = analogRead(SOIL_PIN2);
-  soilMoisture1 = map(raw1, 3500, 1200, 0, 100);
-  soilMoisture2 = map(raw2, 3500, 1200, 0, 100);
+  soilMoisture1 = map(raw1, 2920, 1100, 0, 100);
+  soilMoisture2 = map(raw2, 2873, 1100, 0, 100);
   soilMoisture1 = constrain(soilMoisture1, 0, 100);
   soilMoisture2 = constrain(soilMoisture2, 0, 100);
   avrgSoilMoisture = (soilMoisture1 + soilMoisture2) / 2.0;
@@ -323,10 +336,11 @@ void readSensors() {
 // have been changed via the mobile app while the device was offline.
 BLYNK_CONNECTED() {
   Blynk.syncAll();
-
+  syncStartTime = millis();
 }
 
 BLYNK_WRITE(VPIN_IRRIGATION) {
+  if (isSyncing) return;
   if (autoMode) return;  // Ignore manual control in auto mode
 
   bool wasOn = irrigationState;
@@ -345,6 +359,10 @@ BLYNK_WRITE(VPIN_IRRIGATION) {
 
 
 BLYNK_WRITE(VPIN_AUTO_MODE) {
+  if (isSyncing) {  
+    autoMode = param.asInt();  // still update state
+    return;
+  }
   autoMode = param.asInt();
 
   // Safety: turn off pumps when auto mode is disabled
@@ -372,6 +390,9 @@ BLYNK_WRITE(VPIN_LONG)   { durationLong   = param.asInt(); }
 BLYNK_WRITE(VPIN_MANUAL_DURATION) { irrigationDuration = param.asInt(); }
 
 BLYNK_WRITE(VPIN_TANK_PUMP) {
+  if (isSyncing) return;
+  if (autoMode) return;
+
   bool wasOn = tankPumpState;
   tankPumpState = param.asInt();
   tankPumpIsAuto = false;  // Mark as manual
@@ -452,16 +473,20 @@ void setup() {
   Blynk.connect();
 
 
-  timer.setInterval(120000L, readSensors); // 2 minutes
+  timer.setInterval(90000L, readSensors); // 1 minute and 30 sec
 }
 
 // ======================================================
 // LOOP
 // ======================================================
 void loop() {
+
+  if (isSyncing && millis() - syncStartTime > 3000) {
+    isSyncing = false;
+    Serial.println("✅ Sync complete");
+  }
+
   Blynk.run();
   timer.run();
   checkPumps();
-  
 }
- 

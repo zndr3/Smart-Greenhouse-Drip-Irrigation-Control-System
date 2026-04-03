@@ -123,9 +123,9 @@ COOL	| HUMID |	Short
   - WiFiManager
 
 Example:
-  HOT + DRY_AIR → Long irrigation
-  WARM + NORMAL → Medium irrigation
-  COOL + HUMID → Short irrigation
+  - HOT + DRY_AIR → Long irrigation
+  - WARM + NORMAL → Medium irrigation
+  - COOL + HUMID → Short irrigation
 
 ### 📌 Pin Configuration
 - Sensors

@@ -126,7 +126,7 @@ NotificationItem notificationQueue[NOTIFICATION_QUEUE_SIZE];
 int queueHead = 0;
 int queueTail = 0;
 unsigned long lastNotificationTime = 0;
-const unsigned long NOTIFICATION_INTERVAL = 1000; // 1 second between notifications
+const unsigned long NOTIFICATION_INTERVAL = 2500; // 2.5 seconds between notifications
 
 // ======================================================
 // QUEUE NOTIFICATION FUNCTIONS
@@ -340,8 +340,8 @@ void readSensors() {
 
   int raw1 = analogRead(SOIL_PIN1);
   int raw2 = analogRead(SOIL_PIN2);
-  soilMoisture1 = map(raw1, 2920, 1100, 0, 100);
-  soilMoisture2 = map(raw2, 2873, 1100, 0, 100);
+  soilMoisture1 = map(raw1, 3010, 1100, 0, 100);
+  soilMoisture2 = map(raw2, 2960, 1100, 0, 100);
   soilMoisture1 = constrain(soilMoisture1, 0, 100);
   soilMoisture2 = constrain(soilMoisture2, 0, 100);
   avrgSoilMoisture = (soilMoisture1 + soilMoisture2) / 2.0;
@@ -364,53 +364,6 @@ void readSensors() {
   Blynk.virtualWrite(VPIN_SOIL2, soilMoisture2);
   Blynk.virtualWrite(VPIN_SOIL_STATE, soilState);
   Blynk.virtualWrite(VPIN_WATER_LEVEL, waterPercent);
-
-  // ---- INDEPENDENT AUTO MODE IRRIGATION (PUMP 1) ----
-  if (autoMode && !irrigationState1 && soilMoisture1 <= soilWarningThreshold && waterPercent > waterThreshold) {
-    irrigationDuration1 = decideIrrigationDuration();
-    irrigationState1 = true;
-    irrigationIsAuto1 = true;
-    irrigationStart1 = millis();
-
-    digitalWrite(IRRIGATION_PUMP_PIN1, HIGH);
-    Blynk.virtualWrite(VPIN_IRRIGATION, 1);
-
-    queueNotification("irrigation_auto", "Pump 1 auto irrigation started");
-
-    Serial.println("🌱 Pump 1 auto irrigation started");
-    sendToSupabase();
-  }
-
-  // ---- INDEPENDENT AUTO MODE IRRIGATION (PUMP 2) ----
-  if (autoMode && !irrigationState2 && soilMoisture2 <= soilWarningThreshold && waterPercent > waterThreshold) {
-    irrigationDuration2 = decideIrrigationDuration();
-    irrigationState2 = true;
-    irrigationIsAuto2 = true;
-    irrigationStart2 = millis();
-
-    digitalWrite(IRRIGATION_PUMP_PIN2, HIGH);
-    Blynk.virtualWrite(VPIN_IRRIGATION2, 1);
-
-    queueNotification("irrigation_auto", "Pump 2 auto irrigation started");
-
-    Serial.println("🌱 Pump 2 auto irrigation started");
-    sendToSupabase();
-  }
-
-  // ---- AUTO MODE TANK PUMP ----
-  // if (autoMode && !tankPumpState && waterPercent <= waterThreshold) {
-  //   tankPumpState = true;
-  //   tankPumpIsAuto = true;
-  //   tankPumpStart = millis();
-
-  //   digitalWrite(TANK_PUMP_PIN, HIGH);
-  //   Blynk.virtualWrite(VPIN_TANK_PUMP, 1);
-
-  //   Blynk.logEvent("sensor_warning", "Water level too low - tank pump started");
-
-  //   Serial.println("🚰 Tank pump auto started");
-  //   sendToSupabase();
-  // }
 
   // ---- SENSOR WARNINGS (CONSOLIDATED) ----
 
@@ -459,6 +412,53 @@ void readSensors() {
   } else if (waterLevelAlertSent && waterPercent > (waterThreshold + 5)) {
     waterLevelAlertSent = false;  // Reset when level recovers
   }
+
+  // ---- INDEPENDENT AUTO MODE IRRIGATION (PUMP 1) ----
+  if (autoMode && !irrigationState1 && soilMoisture1 <= soilWarningThreshold && waterPercent > waterThreshold) {
+    irrigationDuration1 = decideIrrigationDuration();
+    irrigationState1 = true;
+    irrigationIsAuto1 = true;
+    irrigationStart1 = millis();
+
+    digitalWrite(IRRIGATION_PUMP_PIN1, HIGH);
+    Blynk.virtualWrite(VPIN_IRRIGATION, 1);
+
+    queueNotification("irrigation_auto", "Pump 1 auto irrigation started");
+
+    Serial.println("🌱 Pump 1 auto irrigation started");
+    sendToSupabase();
+  }
+
+  // ---- INDEPENDENT AUTO MODE IRRIGATION (PUMP 2) ----
+  if (autoMode && !irrigationState2 && soilMoisture2 <= soilWarningThreshold && waterPercent > waterThreshold) {
+    irrigationDuration2 = decideIrrigationDuration();
+    irrigationState2 = true;
+    irrigationIsAuto2 = true;
+    irrigationStart2 = millis();
+
+    digitalWrite(IRRIGATION_PUMP_PIN2, HIGH);
+    Blynk.virtualWrite(VPIN_IRRIGATION2, 1);
+
+    queueNotification("irrigation_auto", "Pump 2 auto irrigation started");
+
+    Serial.println("🌱 Pump 2 auto irrigation started");
+    sendToSupabase();
+  }
+
+  // ---- AUTO MODE TANK PUMP ----
+  // if (autoMode && !tankPumpState && waterPercent <= waterThreshold) {
+  //   tankPumpState = true;
+  //   tankPumpIsAuto = true;
+  //   tankPumpStart = millis();
+
+  //   digitalWrite(TANK_PUMP_PIN, HIGH);
+  //   Blynk.virtualWrite(VPIN_TANK_PUMP, 1);
+
+  //   Blynk.logEvent("sensor_warning", "Water level too low - tank pump started");
+
+  //   Serial.println("🚰 Tank pump auto started");
+  //   sendToSupabase();
+  // }
 }
 
 // ======================================================
